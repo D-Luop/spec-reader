@@ -1,0 +1,10 @@
+title: Petstore API
+proxy:
+  timeoutSeconds: 30
+  allowPrivateNetworks: false
+specs:
+  - id: petstore
+    label: Petstore
+    file: openapi.yaml
+    group: Examples
+    production: false
