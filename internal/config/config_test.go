@@ -36,3 +36,37 @@ func TestLoadRejectsMissingSpec(t *testing.T) {
 		t.Fatal("expected missing spec error")
 	}
 }
+
+func TestLoadAcceptsGitHubSpec(t *testing.T) {
+	d := t.TempDir()
+	p := filepath.Join(d, "config.yaml")
+	contents := "specs:\n  - id: demo\n    github:\n      repository: D-Luop/example\n      ref: main\n      path: docs/openapi.yaml\n      tokenEnv: TEST_GITHUB_TOKEN\n"
+	if err := os.WriteFile(p, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Specs[0].GitHub.Repository != "D-Luop/example" {
+		t.Fatalf("github source not loaded: %#v", cfg.Specs[0].GitHub)
+	}
+	if cfg.Specs[0].GitHub.TokenEnv != "TEST_GITHUB_TOKEN" {
+		t.Fatal("token environment variable was not retained")
+	}
+}
+
+func TestLoadRejectsAmbiguousSource(t *testing.T) {
+	d := t.TempDir()
+	if err := os.WriteFile(filepath.Join(d, "api.yaml"), []byte("openapi: 3.1.0\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(d, "config.yaml")
+	contents := "specs:\n  - id: demo\n    file: api.yaml\n    github: {repository: D-Luop/example, ref: main, path: openapi.yaml}\n"
+	if err := os.WriteFile(p, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("expected file plus github to be rejected")
+	}
+}

@@ -1,15 +1,18 @@
 package server
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 
 	"github.com/D-Luop/spec-reader/internal/config"
+	"github.com/D-Luop/spec-reader/internal/specs"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -19,6 +22,7 @@ var assets embed.FS
 type api struct {
 	cfg   config.Config
 	proxy *proxy
+	specs *specs.Store
 }
 
 func New(cfg config.Config) (http.Handler, error) {
@@ -26,7 +30,11 @@ func New(cfg config.Config) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &api{cfg: cfg, proxy: p}
+	store, err := specs.New(context.Background(), cfg)
+	if err != nil {
+		return nil, err
+	}
+	a := &api{cfg: cfg, proxy: p, specs: store}
 	r := chi.NewRouter()
 	r.Use(securityHeaders)
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -35,6 +43,7 @@ func New(cfg config.Config) (http.Handler, error) {
 	})
 	r.Get("/config.json", a.config)
 	r.Get("/specs/{id}", a.spec)
+	r.Post("/api/specs/{id}/refresh", a.refreshSpec)
 	r.Post("/api/proxy", a.proxy.handle)
 	web, err := fs.Sub(assets, "dist")
 	if err != nil {
@@ -52,15 +61,32 @@ func (a *api) config(w http.ResponseWriter, _ *http.Request) {
 
 func (a *api) spec(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	for _, spec := range a.cfg.Specs {
-		if spec.ID != id {
-			continue
-		}
-		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
-		http.ServeFile(w, r, spec.File)
+	body, ok := a.specs.Get(id)
+	if !ok {
+		http.Error(w, "spec not found", http.StatusNotFound)
 		return
 	}
-	http.Error(w, "spec not found", http.StatusNotFound)
+	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(body)
+}
+
+func (a *api) refreshSpec(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Spec-Reader") != "1" || !sameOrigin(r) {
+		http.Error(w, "same-origin refresh required", http.StatusForbidden)
+		return
+	}
+	changed, err := a.specs.Refresh(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "spec not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "refresh failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"changed": changed})
 }
 
 func spa(files http.Handler, web fs.FS) http.HandlerFunc {
