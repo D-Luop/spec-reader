@@ -8,3 +8,11 @@ specs:
     file: openapi.yaml
     group: Examples
     production: false
+  # A spec can instead be read directly from GitHub. Set tokenEnv for a
+  # private repository; omit it for public repositories.
+  # - id: remote-api
+  #   github:
+  #     repository: your-org/your-repo
+  #     ref: main
+  #     path: openapi.yaml
+  #     tokenEnv: SPEC_READER_GITHUB_TOKEN

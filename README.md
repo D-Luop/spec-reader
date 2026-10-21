@@ -19,7 +19,11 @@ docker run --rm -p 3013:3013 \
 
 ## Configuration
 
-See [`examples/petstore/config.yaml`](examples/petstore/config.yaml). Each spec needs a stable `id`, a local `file`, and optional `group`, `production`, and `tryIt` values. The proxy only permits origins declared by a loaded spec or `proxy.extraOrigins`; private, loopback, link-local, and Tailscale addresses are rejected unless `allowPrivateNetworks` is explicitly enabled.
+See [`examples/petstore/config.yaml`](examples/petstore/config.yaml). Each spec needs a stable `id` and exactly one source: a local `file`, or a `github` object containing `repository` (`owner/name`), `ref` (branch, tag, or SHA), and `path`. For private repositories, set `tokenEnv` to the name of an environment variable containing a fine-grained GitHub token with read-only Contents access. Public repositories need no token.
+
+GitHub sources fetch only the configured file through the Contents API. The reader caches the last good copy on disk and sends its ETag with later refreshes, so unchanged files return `304 Not Modified` without being downloaded again. Use **Refresh spec** in the catalog to refetch the selected definition. `POST /api/specs/{id}/refresh` provides the same operation for automation and requires the normal same-origin `X-Spec-Reader: 1` guard. The repository, ref, and path are visible to the browser; the token environment variable and token are not.
+
+Optional `group`, `production`, and `tryIt` values control presentation and request behavior. The proxy only permits origins declared by a loaded spec or `proxy.extraOrigins`; private, loopback, link-local, and Tailscale addresses are rejected unless `allowPrivateNetworks` is explicitly enabled.
 
 Authentication presets describe a JSON login call and paths to the returned access token, refresh token, and expiry. Tokens remain in the browser. Session storage is the default; users can explicitly opt into local storage.
 

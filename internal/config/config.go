@@ -5,16 +5,18 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	Title string `yaml:"title" json:"title"`
-	Proxy Proxy  `yaml:"proxy" json:"proxy"`
-	Specs []Spec `yaml:"specs" json:"specs"`
-	Auth  Auth   `yaml:"auth" json:"auth,omitempty"`
+	Title    string `yaml:"title" json:"title"`
+	CacheDir string `yaml:"cacheDir" json:"-"`
+	Proxy    Proxy  `yaml:"proxy" json:"proxy"`
+	Specs    []Spec `yaml:"specs" json:"specs"`
+	Auth     Auth   `yaml:"auth" json:"auth,omitempty"`
 }
 
 type Proxy struct {
@@ -24,12 +26,20 @@ type Proxy struct {
 }
 
 type Spec struct {
-	ID         string `yaml:"id" json:"id"`
-	Label      string `yaml:"label" json:"label,omitempty"`
-	File       string `yaml:"file" json:"-"`
-	Group      string `yaml:"group" json:"group,omitempty"`
-	Production bool   `yaml:"production" json:"production,omitempty"`
-	TryIt      *bool  `yaml:"tryIt" json:"tryIt,omitempty"`
+	ID         string        `yaml:"id" json:"id"`
+	Label      string        `yaml:"label" json:"label,omitempty"`
+	File       string        `yaml:"file" json:"-"`
+	GitHub     *GitHubSource `yaml:"github" json:"github,omitempty"`
+	Group      string        `yaml:"group" json:"group,omitempty"`
+	Production bool          `yaml:"production" json:"production,omitempty"`
+	TryIt      *bool         `yaml:"tryIt" json:"tryIt,omitempty"`
+}
+
+type GitHubSource struct {
+	Repository string `yaml:"repository" json:"repository"`
+	Ref        string `yaml:"ref" json:"ref"`
+	Path       string `yaml:"path" json:"path"`
+	TokenEnv   string `yaml:"tokenEnv" json:"-"`
 }
 
 type Auth struct {
@@ -72,6 +82,11 @@ func Load(path string) (Config, error) {
 	if cfg.Proxy.TimeoutSeconds == 0 {
 		cfg.Proxy.TimeoutSeconds = 30
 	}
+	if cfg.CacheDir == "" {
+		cfg.CacheDir = filepath.Join(os.TempDir(), "spec-reader-cache")
+	} else if !filepath.IsAbs(cfg.CacheDir) {
+		cfg.CacheDir = filepath.Join(filepath.Dir(path), cfg.CacheDir)
+	}
 	if cfg.Proxy.TimeoutSeconds < 1 || cfg.Proxy.TimeoutSeconds > int((2*time.Minute)/time.Second) {
 		return Config{}, fmt.Errorf("proxy.timeoutSeconds must be between 1 and 120")
 	}
@@ -79,18 +94,27 @@ func Load(path string) (Config, error) {
 	seen := map[string]bool{}
 	for i := range cfg.Specs {
 		s := &cfg.Specs[i]
-		if s.ID == "" || s.File == "" {
-			return Config{}, fmt.Errorf("spec %d requires id and file", i+1)
+		if s.ID == "" {
+			return Config{}, fmt.Errorf("spec %d requires id", i+1)
+		}
+		if (s.File == "") == (s.GitHub == nil) {
+			return Config{}, fmt.Errorf("spec %q requires exactly one of file or github", s.ID)
 		}
 		if seen[s.ID] {
 			return Config{}, fmt.Errorf("duplicate spec id %q", s.ID)
 		}
 		seen[s.ID] = true
-		if !filepath.IsAbs(s.File) {
-			s.File = filepath.Join(base, s.File)
-		}
-		if _, err := os.Stat(s.File); err != nil {
-			return Config{}, fmt.Errorf("spec %q: %w", s.ID, err)
+		if s.File != "" {
+			if !filepath.IsAbs(s.File) {
+				s.File = filepath.Join(base, s.File)
+			}
+			if _, err := os.Stat(s.File); err != nil {
+				return Config{}, fmt.Errorf("spec %q: %w", s.ID, err)
+			}
+		} else {
+			if err := validateGitHub(*s.GitHub); err != nil {
+				return Config{}, fmt.Errorf("spec %q github: %w", s.ID, err)
+			}
 		}
 	}
 	for _, origin := range cfg.Proxy.ExtraOrigins {
@@ -99,6 +123,17 @@ func Load(path string) (Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+func validateGitHub(source GitHubSource) error {
+	parts := strings.Split(source.Repository, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf("repository must be owner/name")
+	}
+	if source.Ref == "" || source.Path == "" || strings.HasPrefix(source.Path, "/") || strings.Contains(source.Path, "..") {
+		return fmt.Errorf("ref and a relative path without '..' are required")
+	}
+	return nil
 }
 
 func validOrigin(raw string) error {
