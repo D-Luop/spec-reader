@@ -34,6 +34,15 @@ jobs:
         with: {registry: ghcr.io, username: '${{ github.actor }}', password: '${{ secrets.GITHUB_TOKEN }}'}
       - uses: docker/metadata-action@v5
         id: meta
-        with: {images: ghcr.io/d-luop/spec-reader, tags: 'type=semver,pattern={{version}}\ntype=raw,value=latest'}
+        with:
+          images: ghcr.io/d-luop/spec-reader
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
       - uses: docker/build-push-action@v6
-        with: {context: ., platforms: linux/amd64,linux/arm64, push: true, tags: '${{ steps.meta.outputs.tags }}', labels: '${{ steps.meta.outputs.labels }}'}
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
